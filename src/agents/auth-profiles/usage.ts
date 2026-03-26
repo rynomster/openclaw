@@ -292,17 +292,24 @@ export async function markAuthProfileUsed(params: {
   authProfileUsageDeps.saveAuthProfileStore(store, agentDir);
 }
 
-export function calculateAuthProfileCooldownMs(errorCount: number): number {
+export function calculateAuthProfileCooldownMs(
+  errorCount: number,
+  params?: { baseMs?: number; maxMs?: number },
+): number {
   const normalized = Math.max(1, errorCount);
-  return Math.min(
-    60 * 60 * 1000, // 1 hour max
-    60 * 1000 * 5 ** Math.min(normalized - 1, 3),
-  );
+  const baseMs = Math.max(1000, params?.baseMs ?? 60_000);
+  const maxMs = Math.max(baseMs, params?.maxMs ?? 3600_000);
+  const exponent = Math.min(normalized - 1, 10);
+  const exponent = Math.min(normalized - 1, 10);
+  const raw = baseMs * 5 ** exponent;
+  return Math.min(maxMs, raw);
 }
 
 type ResolvedAuthCooldownConfig = {
   billingBackoffMs: number;
   billingMaxMs: number;
+  rateLimitBackoffMs: number;
+  rateLimitMaxMs: number;
   failureWindowMs: number;
 };
 
@@ -313,6 +320,8 @@ function resolveAuthCooldownConfig(params: {
   const defaults = {
     billingBackoffHours: 5,
     billingMaxHours: 24,
+    rateLimitBackoffMinutes: 1,
+    rateLimitMaxHours: 1,
     failureWindowHours: 24,
   } as const;
 
@@ -338,6 +347,17 @@ function resolveAuthCooldownConfig(params: {
     defaults.billingBackoffHours,
   );
   const billingMaxHours = resolveHours(cooldowns?.billingMaxHours, defaults.billingMaxHours);
+
+  // Added support for configurable rate limit backoff (legacy: hardcoded to 1 min base / 1 hour max)
+  const rateLimitBackoffMinutes = resolveHours(
+    cooldowns?.rateLimitBackoffMinutes,
+    defaults.rateLimitBackoffMinutes,
+  );
+  const rateLimitMaxHours = resolveHours(
+    cooldowns?.rateLimitMaxHours,
+    defaults.rateLimitMaxHours,
+  );
+
   const failureWindowHours = resolveHours(
     cooldowns?.failureWindowHours,
     defaults.failureWindowHours,
@@ -346,6 +366,8 @@ function resolveAuthCooldownConfig(params: {
   return {
     billingBackoffMs: billingBackoffHours * 60 * 60 * 1000,
     billingMaxMs: billingMaxHours * 60 * 60 * 1000,
+    rateLimitBackoffMs: rateLimitBackoffMinutes * 60 * 1000,
+    rateLimitMaxMs: rateLimitMaxHours * 60 * 60 * 1000,
     failureWindowMs: failureWindowHours * 60 * 60 * 1000,
   };
 }
@@ -462,7 +484,10 @@ function computeNextProfileUsageStats(params: {
     });
     updatedStats.disabledReason = params.reason;
   } else {
-    const backoffMs = calculateAuthProfileCooldownMs(nextErrorCount);
+    const backoffMs = calculateAuthProfileCooldownMs(nextErrorCount, {
+      baseMs: params.cfgResolved.rateLimitBackoffMs,
+      maxMs: params.cfgResolved.rateLimitMaxMs,
+    });
     // Keep active cooldown windows immutable so retries within the window
     // cannot push recovery further out.
     updatedStats.cooldownUntil = keepActiveWindowOrRecompute({

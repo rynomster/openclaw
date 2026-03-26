@@ -442,7 +442,18 @@ export const OpenClawSchema = z
             billingBackoffHours: z.number().positive().optional(),
             billingBackoffHoursByProvider: z.record(z.string(), z.number().positive()).optional(),
             billingMaxHours: z.number().positive().optional(),
+            rateLimitBackoffMinutes: z.number().positive().optional(),
+            rateLimitMaxHours: z.number().positive().optional(),
             failureWindowHours: z.number().positive().optional(),
+          })
+          .strict()
+          .optional(),
+        retries: z
+          .object({
+            default: z.number().int().min(0).max(10).optional(),
+            rate_limit: z.number().int().min(0).max(10).optional(),
+            overloaded: z.number().int().min(0).max(10).optional(),
+            auth_failure: z.number().int().min(0).max(10).optional(),
           })
           .strict()
           .optional(),

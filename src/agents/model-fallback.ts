@@ -18,6 +18,7 @@ import {
   describeFailoverError,
   isFailoverError,
   isTimeoutError,
+  resolveFailoverReasonFromError,
 } from "./failover-error.js";
 import {
   shouldAllowCooldownProbeForReason,
@@ -35,7 +36,8 @@ import {
   resolveModelRefFromString,
 } from "./model-selection.js";
 import type { FailoverReason } from "./pi-embedded-helpers.js";
-import { isLikelyContextOverflowError } from "./pi-embedded-helpers.js";
+import { isLikelyContextOverflowError, isRateLimitErrorMessage } from "./pi-embedded-helpers.js";
+import { retryAsync } from "../infra/retry.js";
 
 const log = createSubsystemLogger("model-fallback");
 
@@ -137,9 +139,24 @@ async function runFallbackCandidate<T>(params: {
   options?: ModelFallbackRunOptions;
 }): Promise<{ ok: true; result: T } | { ok: false; error: unknown }> {
   try {
-    const result = params.options
-      ? await params.run(params.provider, params.model, params.options)
-      : await params.run(params.provider, params.model);
+    const runFn = async () =>
+      params.options
+        ? await params.run(params.provider, params.model, params.options)
+        : await params.run(params.provider, params.model);
+
+    // Apply internal retry for rate-limiting errors BEFORE giving up and
+    // moving to the next candidate model in the fallback chain.
+    const result = await retryAsync(runFn, {
+      attempts: 4, // 1 initial + 3 retries
+      minDelayMs: 2000,
+      maxDelayMs: 30000,
+      jitter: 0.1,
+      shouldRetry: (err) => {
+        const reason = resolveFailoverReasonFromError(err);
+        return reason === "rate_limit" || reason === "overloaded";
+      },
+    });
+
     return {
       ok: true,
       result,
@@ -536,6 +553,10 @@ export async function runWithModelFallback<T>(params: {
   const attempts: FallbackAttempt[] = [];
   let lastError: unknown;
   const cooldownProbeUsedProviders = new Set<string>();
+  const retryConfig = params.cfg?.agents?.retries;
+  const rateLimitRetryCount = retryConfig?.rate_limit ?? 1;
+  const overloadedRetryCount = retryConfig?.overloaded ?? 1;
+  const authFailureRetryCount = retryConfig?.auth_failure ?? 0;
 
   const hasFallbackCandidates = candidates.length > 1;
 
@@ -661,6 +682,30 @@ export async function runWithModelFallback<T>(params: {
       attempts,
       options: runOptions,
     });
+    if ("success" in attemptRun) {
+      if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
+        logModelFallbackDecision({
+          decision: "candidate_succeeded",
+          runId: params.runId,
+          requestedProvider: params.provider,
+          requestedModel: params.model,
+          candidate,
+          attempt: i + 1,
+          total: candidates.length,
+          previousAttempts: attempts,
+          isPrimary,
+          requestedModelMatched: requestedModel,
+          fallbackConfigured: hasFallbackCandidates,
+        });
+      }
+      const notFoundAttempt =
+        i > 0 ? attempts.find((a) => a.reason === "model_not_found") : undefined;
+      if (notFoundAttempt) {
+        log.warn(
+          `Model "${sanitizeForLog(notFoundAttempt.provider)}/${sanitizeForLog(notFoundAttempt.model)}" not found. Fell back to "${sanitizeForLog(candidate.provider)}/${sanitizeForLog(candidate.model)}".`,
+        );
+      }
+      return attemptRun.success;
     if ("success" in attemptRun) {
       if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
         logModelFallbackDecision({

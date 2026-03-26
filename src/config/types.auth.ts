@@ -21,10 +21,25 @@ export type AuthConfig = {
     billingBackoffHoursByProvider?: Record<string, number>;
     /** Billing backoff cap (hours). Default: 24. */
     billingMaxHours?: number;
+    /** Default rate-limit backoff (minutes). Default: 1. */
+    rateLimitBackoffMinutes?: number;
+    /** Rate-limit backoff cap (hours). Default: 1. */
+    rateLimitMaxHours?: number;
     /**
      * Failure window for backoff counters (hours). If no failures occur within
      * this window, counters reset. Default: 24.
      */
     failureWindowHours?: number;
+  };
+  /** Default retry settings for rate_limit and overloaded errors. */
+  retries?: {
+    /** Default retry count for rate_limit and overloaded errors. Default: 1. */
+    default?: number;
+    /** Retry count for rate_limit errors. Default: 1. */
+    rate_limit?: number;
+    /** Retry count for overloaded errors. Default: 1. */
+    overloaded?: number;
+    /** Retry count for auth failures. Default: 0 (no retry). */
+    auth_failure?: number;
   };
 };
