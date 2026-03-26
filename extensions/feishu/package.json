@@ -10,7 +10,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "openclaw": "workspace:*"
+    "openclaw": "^2026.3.22"
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.22"
