@@ -620,7 +620,8 @@ function computeNextProfileUsageStats(params: {
 
 /**
  * Mark a profile as failed for a specific reason. Billing and permanent-auth
- * failures are treated as "disabled" (longer backoff) vs the regular cooldown window.
+ * failures are treated as "disabled" (longer backoff) vs the regular cooldown
+ * window.
  */
 export async function markAuthProfileFailure(params: {
   store: AuthProfileStore;
@@ -632,7 +633,6 @@ export async function markAuthProfileFailure(params: {
   modelId?: string;
 }): Promise<void> {
   const { store, profileId, reason, agentDir, cfg, runId, modelId } = params;
-
   const profile = store.profiles[profileId];
   if (!profile || isAuthCooldownBypassedForProvider(profile.provider)) {
     return;
