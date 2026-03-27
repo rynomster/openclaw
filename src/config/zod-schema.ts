@@ -5,6 +5,7 @@ import { ToolsSchema } from "./zod-schema.agent-runtime.js";
 import { AgentsSchema, AudioSchema, BindingsSchema, BroadcastSchema } from "./zod-schema.agents.js";
 import { ApprovalsSchema } from "./zod-schema.approvals.js";
 import {
+  FailoverRetriesSchema,
   HexColorSchema,
   ModelsConfigSchema,
   SecretInputSchema,
@@ -448,15 +449,7 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
-        retries: z
-          .object({
-            default: z.number().int().min(0).max(10).optional(),
-            rate_limit: z.number().int().min(0).max(10).optional(),
-            overloaded: z.number().int().min(0).max(10).optional(),
-            auth_failure: z.number().int().min(0).max(10).optional(),
-          })
-          .strict()
-          .optional(),
+        retries: FailoverRetriesSchema,
       })
       .strict()
       .optional(),

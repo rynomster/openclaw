@@ -1,6 +1,7 @@
 import type { ChatType } from "../channels/chat-type.js";
 import type { AgentDefaultsConfig } from "./types.agent-defaults.js";
 import type { AgentModelConfig, AgentSandboxConfig } from "./types.agents-shared.js";
+import type { FailoverRetriesConfig } from "./types.auth.js";
 import type { HumanDelayConfig, IdentityConfig } from "./types.base.js";
 import type { GroupChatConfig } from "./types.messages.js";
 import type { AgentToolsConfig, MemorySearchConfig } from "./types.tools.js";
@@ -98,15 +99,6 @@ export type AgentConfig = {
 export type AgentsConfig = {
   defaults?: AgentDefaultsConfig;
   /** Optional retry settings for model fallback retries. */
-  retries?: {
-    /** Fallback retry count for unspecified retryable reasons. */
-    default?: number;
-    /** Retry count for rate_limit errors. */
-    rate_limit?: number;
-    /** Retry count for overloaded errors. */
-    overloaded?: number;
-    /** Retry count for auth/auth_permanent failures. */
-    auth_failure?: number;
-  };
+  retries?: FailoverRetriesConfig;
   list?: AgentConfig[];
 };

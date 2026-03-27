@@ -11,6 +11,23 @@ export type AuthProfileConfig = {
   displayName?: string;
 };
 
+/**
+ * Retry counts keyed by normalized failover reason names.
+ *
+ * Property names intentionally use snake_case to match failover reason IDs
+ * emitted by the runtime classifier (e.g. "rate_limit", "auth_failure").
+ */
+export type FailoverRetriesConfig = {
+  /** Default retry count for rate_limit and overloaded errors. Default: 1. */
+  default?: number;
+  /** Retry count for rate_limit errors. Default: 1. */
+  rate_limit?: number;
+  /** Retry count for overloaded errors. Default: 1. */
+  overloaded?: number;
+  /** Retry count for auth failures. Default: 0 (no retry). */
+  auth_failure?: number;
+};
+
 export type AuthConfig = {
   profiles?: Record<string, AuthProfileConfig>;
   order?: Record<string, string[]>;
@@ -32,14 +49,5 @@ export type AuthConfig = {
     failureWindowHours?: number;
   };
   /** Default retry settings for rate_limit and overloaded errors. */
-  retries?: {
-    /** Default retry count for rate_limit and overloaded errors. Default: 1. */
-    default?: number;
-    /** Retry count for rate_limit errors. Default: 1. */
-    rate_limit?: number;
-    /** Retry count for overloaded errors. Default: 1. */
-    overloaded?: number;
-    /** Retry count for auth failures. Default: 0 (no retry). */
-    auth_failure?: number;
-  };
+  retries?: FailoverRetriesConfig;
 };
