@@ -406,8 +406,9 @@ function resolveAuthCooldownConfig(params: {
   const defaults = {
     billingBackoffHours: 5,
     billingMaxHours: 24,
-    rateLimitBackoffMinutes: 1,
-    rateLimitMaxHours: 1,
+    // Keep legacy transient cooldown defaults (30s base, 5m cap) when unset.
+    rateLimitBackoffMinutes: 0.5,
+    rateLimitMaxHours: 5 / 60,
     failureWindowHours: 24,
   } as const;
 
@@ -594,14 +595,13 @@ function computeNextProfileUsageStats(params: {
         // If we hit a general error (like 500 Service Error), lock the whole profile
         updatedStats.cooldownModel = undefined;
       } else if (params.modelId) {
-        // Model-specific errors: scope to the model if not already scoped
-        if (!params.existing.cooldownModel) {
-          updatedStats.cooldownModel = params.modelId;
-        }
         // If a different model fails during an active cooldown, widen to profile-wide lockout
         // (prevents "whack-a-mole" retries across models on one dying profile)
         if (params.existing.cooldownModel && params.existing.cooldownModel !== params.modelId) {
           updatedStats.cooldownModel = undefined;
+        } else {
+          // Preserve existing scope (model-scoped or profile-wide).
+          updatedStats.cooldownModel = params.existing.cooldownModel;
         }
       } else {
         // Keep existing scope (specific model or already undefined)
