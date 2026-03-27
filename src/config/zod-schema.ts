@@ -5,12 +5,12 @@ import { ToolsSchema } from "./zod-schema.agent-runtime.js";
 import { AgentsSchema, AudioSchema, BindingsSchema, BroadcastSchema } from "./zod-schema.agents.js";
 import { ApprovalsSchema } from "./zod-schema.approvals.js";
 import {
-  FailoverRetriesSchema,
   HexColorSchema,
   ModelsConfigSchema,
   SecretInputSchema,
   SecretsConfigSchema,
 } from "./zod-schema.core.js";
+import { FailoverRetriesSchema } from "./zod-schema.failover.js";
 import { HookMappingSchema, HooksGmailSchema, InternalHooksSchema } from "./zod-schema.hooks.js";
 import { PluginInstallRecordShape } from "./zod-schema.installs.js";
 import { ChannelsSchema } from "./zod-schema.providers.js";
