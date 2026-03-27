@@ -10,6 +10,7 @@ import {
   SecretInputSchema,
   SecretsConfigSchema,
 } from "./zod-schema.core.js";
+import { FailoverRetriesSchema } from "./zod-schema.failover.js";
 import { HookMappingSchema, HooksGmailSchema, InternalHooksSchema } from "./zod-schema.hooks.js";
 import { PluginInstallRecordShape } from "./zod-schema.installs.js";
 import { ChannelsSchema } from "./zod-schema.providers.js";
@@ -448,15 +449,7 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
-        retries: z
-          .object({
-            default: z.number().int().min(0).max(10).optional(),
-            rate_limit: z.number().int().min(0).max(10).optional(),
-            overloaded: z.number().int().min(0).max(10).optional(),
-            auth_failure: z.number().int().min(0).max(10).optional(),
-          })
-          .strict()
-          .optional(),
+        retries: FailoverRetriesSchema,
       })
       .strict()
       .optional(),

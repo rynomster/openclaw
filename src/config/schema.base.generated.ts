@@ -1412,6 +1412,32 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                   },
                 ],
               },
+              retries: {
+                type: "object",
+                properties: {
+                  default: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 10,
+                  },
+                  rate_limit: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 10,
+                  },
+                  overloaded: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 10,
+                  },
+                  auth_failure: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 10,
+                  },
+                },
+                additionalProperties: false,
+              },
               imageModel: {
                 anyOf: [
                   {

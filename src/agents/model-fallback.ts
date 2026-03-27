@@ -14,6 +14,7 @@ import {
   resolveProfilesUnavailableReason,
   resolveAuthProfileOrder,
 } from "./auth-profiles.js";
+import { getSoonestCooldownExpiryWithTimestamp } from "./auth-profiles/usage.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 import {
   coerceToFailoverError,
@@ -165,12 +166,18 @@ async function runFallbackCandidate<T>(params: {
   model: string;
   options?: ModelFallbackRunOptions;
   retryConfig?: {
+    default?: number;
     rate_limit?: number;
     overloaded?: number;
     auth_failure?: number;
   };
 }): Promise<{ ok: true; result: T } | { ok: false; error: unknown }> {
   try {
+    const defaultRetryBudget = params.retryConfig?.default ?? 0;
+    const rateLimitRetryBudget = params.retryConfig?.rate_limit ?? defaultRetryBudget;
+    const overloadedRetryBudget = params.retryConfig?.overloaded ?? defaultRetryBudget;
+    const authRetryBudget = params.retryConfig?.auth_failure ?? 0;
+
     const runFn = async () =>
       params.options
         ? await params.run(params.provider, params.model, params.options)
@@ -179,27 +186,20 @@ async function runFallbackCandidate<T>(params: {
     // Apply internal retry for rate-limiting errors BEFORE giving up and
     // moving to the next candidate model in the fallback chain.
     const result = await retryAsync(runFn, {
-      attempts:
-        1 +
-        Math.max(
-          params.retryConfig?.rate_limit ?? 1,
-          params.retryConfig?.overloaded ?? 1,
-          params.retryConfig?.auth_failure ?? 0,
-        ),
+      attempts: 1 + Math.max(rateLimitRetryBudget, overloadedRetryBudget, authRetryBudget),
       minDelayMs: 2000,
       maxDelayMs: 30000,
       jitter: 0.1,
       shouldRetry: (err, attempt) => {
         const reason = resolveFailoverReasonFromError(err);
-        const retryConfig = params.retryConfig;
         if (reason === "rate_limit") {
-          return attempt <= 1 + (retryConfig?.rate_limit ?? 1);
+          return attempt <= rateLimitRetryBudget;
         }
         if (reason === "overloaded") {
-          return attempt <= 1 + (retryConfig?.overloaded ?? 1);
+          return attempt <= overloadedRetryBudget;
         }
-        if (reason === "auth_failure") {
-          return attempt <= 1 + (retryConfig?.auth_failure ?? 0);
+        if (reason === "auth") {
+          return attempt <= authRetryBudget;
         }
         return false;
       },
@@ -230,6 +230,7 @@ async function runFallbackAttempt<T>(params: {
   attempts: FallbackAttempt[];
   options?: ModelFallbackRunOptions;
   retryConfig?: {
+    default?: number;
     rate_limit?: number;
     overloaded?: number;
     auth_failure?: number;
@@ -285,6 +286,7 @@ function resolveFallbackSoonestCooldownExpiry(params: {
   agentDir?: string;
   cfg: OpenClawConfig | undefined;
   candidates: ModelCandidate[];
+  now: number;
 }): number | null {
   if (!params.authStore) {
     return null;
@@ -677,7 +679,8 @@ export async function runWithModelFallback<T>(params: {
   const attempts: FallbackAttempt[] = [];
   let lastError: unknown;
   const cooldownProbeUsedProviders = new Set<string>();
-  const retryConfig = params.cfg?.agents?.retries;
+  const retryConfig = params.cfg?.agents?.defaults?.retries ?? params.cfg?.auth?.retries;
+  const now = Date.now();
 
   const hasFallbackCandidates = candidates.length > 1;
 
@@ -701,7 +704,6 @@ export async function runWithModelFallback<T>(params: {
 
       if (profileIds.length > 0 && !isAnyProfileAvailable) {
         // All profiles for this provider are in cooldown.
-        const now = Date.now();
         const probeThrottleKey = resolveProbeThrottleKey(candidate.provider, params.agentDir);
         const decision = resolveCooldownDecision({
           candidate,
@@ -915,6 +917,7 @@ export async function runWithModelFallback<T>(params: {
       agentDir: params.agentDir,
       cfg: params.cfg,
       candidates,
+      now,
     }),
   });
 }
