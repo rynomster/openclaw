@@ -323,6 +323,7 @@ export function clearExpiredCooldowns(store: AuthProfileStore, now?: number): bo
     // decay check in computeNextProfileUsageStats.
     if (profileMutated && !resolveProfileUnusableUntil(stats)) {
       stats.errorCount = 0;
+      stats.failureCounts = undefined;
     }
 
     if (profileMutated) {
@@ -377,7 +378,7 @@ export function calculateAuthProfileCooldownMs(
 
   // 3-step linear backoff with configurable base/max (defaults: 30s base, 5m max)
   const baseMs = Math.max(30_000, params?.baseMs ?? 30_000);
-  const maxMs = Math.max(baseMs, params?.maxMs ?? 5_000_000);
+  const maxMs = Math.max(baseMs, params?.maxMs ?? 5 * 60_000);
 
   // Step 1 (errorCount 1): Return baseMs (default 30s)
   if (normalized === 1) {
@@ -604,8 +605,9 @@ function computeNextProfileUsageStats(params: {
           updatedStats.cooldownModel = params.existing.cooldownModel;
         }
       } else {
-        // Keep existing scope (specific model or already undefined)
-        updatedStats.cooldownModel = params.existing.cooldownModel;
+        // Model-specific reason without modelId is ambiguous; widen to profile-wide
+        // so other models cannot bypass the active cooldown window.
+        updatedStats.cooldownModel = undefined;
       }
     } else {
       // New cooldown period starts now
