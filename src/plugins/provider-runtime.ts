@@ -19,6 +19,7 @@ import type {
   ProviderCreateStreamFnContext,
   ProviderDefaultThinkingPolicyContext,
   ProviderFetchUsageSnapshotContext,
+  ProviderNormalizeModelIdContext,
   ProviderModernModelPolicyContext,
   ProviderPrepareExtraParamsContext,
   ProviderPrepareDynamicModelContext,
@@ -78,6 +79,7 @@ function resolveHookProviderCacheBucket(params: {
 }
 
 function buildHookProviderCacheKey(params: {
+  config?: OpenClawConfig;
   workspaceDir?: string;
   onlyPluginIds?: string[];
   env?: NodeJS.ProcessEnv;
@@ -86,7 +88,7 @@ function buildHookProviderCacheKey(params: {
     workspaceDir: params.workspaceDir,
     env: params.env,
   });
-  return `${roots.workspace ?? ""}::${roots.global}::${roots.stock ?? ""}::${JSON.stringify(params.onlyPluginIds ?? [])}`;
+  return `${roots.workspace ?? ""}::${roots.global}::${roots.stock ?? ""}::${JSON.stringify(params.config ?? null)}::${JSON.stringify(params.onlyPluginIds ?? [])}`;
 }
 
 export function clearProviderRuntimeHookCache(): void {
@@ -116,6 +118,7 @@ function resolveProviderPluginsForHooks(params: {
     env,
   });
   const cacheKey = buildHookProviderCacheKey({
+    config: params.config,
     workspaceDir: params.workspaceDir,
     onlyPluginIds: params.onlyPluginIds,
     env,
@@ -213,6 +216,25 @@ export function normalizeProviderResolvedModelWithPlugin(params: {
   return (
     resolveProviderRuntimePlugin(params)?.normalizeResolvedModel?.(params.context) ?? undefined
   );
+}
+
+export function normalizeProviderModelIdWithPlugin(params: {
+  provider: string;
+  config?: OpenClawConfig;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+  context: ProviderNormalizeModelIdContext;
+}): string | undefined {
+  const plugin =
+    resolveProviderRuntimePlugin(params) ??
+    resolveProviderPluginsForHooks({
+      config: params.config,
+      workspaceDir: params.workspaceDir,
+      env: params.env,
+    }).find((candidate) => matchesProviderId(candidate, params.provider));
+  const normalized = plugin?.normalizeModelId?.(params.context);
+  const trimmed = normalized?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 export function resolveProviderCapabilitiesWithPlugin(params: {

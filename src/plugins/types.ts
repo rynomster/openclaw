@@ -51,6 +51,7 @@ import type {
   SpeechTelephonySynthesisResult,
   SpeechVoiceOption,
 } from "../tts/provider-types.js";
+import type { DeliveryContext } from "../utils/delivery-context.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 import type { SecretInputMode } from "./provider-auth-types.js";
 import type { createVpsAwareOAuthHandlers } from "./provider-oauth-flow.js";
@@ -125,6 +126,8 @@ export type OpenClawPluginToolContext = {
   };
   messageChannel?: string;
   agentAccountId?: string;
+  /** Trusted ambient delivery route for the active agent/session. */
+  deliveryContext?: DeliveryContext;
   /** Trusted sender id from inbound context (runtime-provided, not tool args). */
   requesterSenderId?: string;
   /** Whether the trusted sender is an owner. */
@@ -169,6 +172,7 @@ export type ProviderAuthResult = {
 /** Interactive auth context passed to provider login/setup methods. */
 export type ProviderAuthContext = {
   config: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
   agentDir?: string;
   workspaceDir?: string;
   prompter: WizardPrompter;
@@ -357,6 +361,17 @@ export type ProviderNormalizeResolvedModelContext = {
   provider: string;
   modelId: string;
   model: ProviderRuntimeModel;
+};
+
+/**
+ * Provider-owned model-id normalization before config/runtime lookup.
+ *
+ * Use this for provider-specific alias cleanup that should stay with the
+ * plugin rather than in core string tables.
+ */
+export type ProviderNormalizeModelIdContext = {
+  provider: string;
+  modelId: string;
 };
 
 /**
@@ -826,6 +841,13 @@ export type ProviderPlugin = {
     ctx: ProviderNormalizeResolvedModelContext,
   ) => ProviderRuntimeModel | null | undefined;
   /**
+   * Provider-owned model-id normalization.
+   *
+   * Runs before model lookup/canonicalization. Use this for alias cleanup such
+   * as provider-owned preview/legacy model ids.
+   */
+  normalizeModelId?: (ctx: ProviderNormalizeModelIdContext) => string | null | undefined;
+  /**
    * Static provider capability overrides consumed by shared transcript/tooling
    * logic.
    *
@@ -1174,6 +1196,8 @@ export type PluginCommandContext = {
   accountId?: string;
   /** Thread/topic id if available */
   messageThreadId?: string | number;
+  /** Parent conversation id for thread-capable channels */
+  threadParentId?: string;
   requestConversationBinding: (
     params?: PluginConversationBindingRequestParams,
   ) => Promise<PluginConversationBindingRequestResult>;

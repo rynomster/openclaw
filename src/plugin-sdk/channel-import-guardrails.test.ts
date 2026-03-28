@@ -62,6 +62,10 @@ const SAME_CHANNEL_SDK_GUARDS: GuardedSource[] = [
     path: "extensions/signal/src/shared.ts",
     forbiddenPatterns: [/["']openclaw\/plugin-sdk\/signal["']/, /plugin-sdk-internal\/signal/],
   },
+  {
+    path: "extensions/signal/src/runtime-api.ts",
+    forbiddenPatterns: [/["']openclaw\/plugin-sdk\/signal["']/, /plugin-sdk-internal\/signal/],
+  },
 ];
 
 const SETUP_BARREL_GUARDS: GuardedSource[] = [
@@ -273,8 +277,10 @@ function collectCoreSourceFiles(): string[] {
     rootDir: srcDir,
     shouldSkipEntry: ({ entryName, normalizedFullPath }) =>
       normalizedFullPath.includes(".test.") ||
+      normalizedFullPath.includes(".test-utils.") ||
       normalizedFullPath.includes(".test-harness.") ||
       normalizedFullPath.includes(".test-helpers.") ||
+      entryName.endsWith("-test-helpers.ts") ||
       entryName === "test-manager-helpers.ts" ||
       normalizedFullPath.includes(".mock-harness.") ||
       normalizedFullPath.includes(".suite.") ||
