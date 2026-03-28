@@ -681,12 +681,11 @@ export async function runWithModelFallback<T>(params: {
     params.cfg?.agents?.defaults?.retries,
     params.cfg?.auth?.retries,
   );
-  const now = Date.now();
-
   const hasFallbackCandidates = candidates.length > 1;
 
   for (let i = 0; i < candidates.length; i += 1) {
     const candidate = candidates[i];
+    const candidateNow = Date.now();
     const isPrimary = i === 0;
     const requestedModel =
       params.provider === candidate.provider && params.model === candidate.model;
@@ -711,7 +710,7 @@ export async function runWithModelFallback<T>(params: {
           isPrimary,
           requestedModel,
           hasFallbackCandidates,
-          now,
+          now: candidateNow,
           probeThrottleKey,
           authStore,
           profileIds,
@@ -744,7 +743,7 @@ export async function runWithModelFallback<T>(params: {
         }
 
         if (decision.markProbe) {
-          markProbeAttempt(now, probeThrottleKey);
+          markProbeAttempt(candidateNow, probeThrottleKey);
         }
         if (shouldAllowCooldownProbeForReason(decision.reason)) {
           // Probe at most once per provider per fallback run when all profiles
@@ -918,7 +917,7 @@ export async function runWithModelFallback<T>(params: {
       agentDir: params.agentDir,
       cfg: params.cfg,
       candidates,
-      now,
+      now: Date.now(),
     }),
   });
 }

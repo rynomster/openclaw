@@ -73,7 +73,8 @@ export function isProfileInCooldown(
     return false;
   }
   const ts = now ?? Date.now();
-  // Model-aware bypass: if the cooldown was caused by a rate_limit on a
+  // Model-aware bypass: if the cooldown was caused by a model-scoped transient
+  // reason (rate_limit/overloaded) on a
   // specific model and the caller is requesting a *different* model, allow it.
   // We still honour any active billing/auth disable (`disabledUntil`) — those
   // are profile-wide and must not be short-circuited by model scoping.
@@ -97,7 +98,8 @@ export function isProfileInCooldownWithTimestamp(
   if (!stats) {
     return false;
   }
-  // Model-aware bypass: if the cooldown was caused by a rate_limit on a
+  // Model-aware bypass: if the cooldown was caused by a model-scoped transient
+  // reason (rate_limit/overloaded) on a
   // specific model and the caller is requesting a *different* model, allow it.
   // We still honour any active billing/auth disable (`disabledUntil`) — those
   // are profile-wide and must not be short-circuited by model scoping.
@@ -255,7 +257,7 @@ function shouldBypassModelScopedCooldown(
 ): boolean {
   return !!(
     forModel &&
-    stats.cooldownReason === "rate_limit" &&
+    (stats.cooldownReason === "rate_limit" || stats.cooldownReason === "overloaded") &&
     stats.cooldownModel &&
     stats.cooldownModel !== forModel &&
     !isActiveUnusableWindow(stats.disabledUntil, now)
