@@ -270,6 +270,43 @@ describe("runWithModelFallback", () => {
     expect(run).toHaveBeenCalledTimes(3);
   });
 
+  it("merges auth and agent retry budgets by key", async () => {
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce({
+        status: 429,
+        message: OPENAI_RATE_LIMIT_MESSAGE,
+        code: "rate_limit",
+      })
+      .mockResolvedValueOnce("ok");
+
+    const result = await runWithModelFallback({
+      cfg: {
+        auth: {
+          retries: {
+            rate_limit: 1,
+            overloaded: 2,
+            auth_failure: 3,
+          },
+        },
+        agents: {
+          defaults: {
+            retries: {
+              overloaded: 0,
+            },
+          },
+        },
+      } as OpenClawConfig,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      fallbacksOverride: [],
+      run,
+    });
+
+    expect(result.result).toBe("ok");
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it("does not retry auth_permanent failures", async () => {
     const run = vi.fn().mockRejectedValue({ status: 401, message: "invalid_api_key" });
 
