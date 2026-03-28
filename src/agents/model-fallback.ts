@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "../config/config.js";
+import type { FailoverRetriesConfig, OpenClawConfig } from "../config/config.js";
 import {
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
@@ -78,6 +78,23 @@ type ModelFallbackRunFn<T> = (
   model: string,
   options?: ModelFallbackRunOptions,
 ) => Promise<T>;
+
+function resolveMergedRetryConfig(
+  agentRetryConfig: FailoverRetriesConfig | undefined,
+  authRetryConfig: FailoverRetriesConfig | undefined,
+): FailoverRetriesConfig | undefined {
+  if (!agentRetryConfig && !authRetryConfig) {
+    return undefined;
+  }
+  // Keys intentionally stay snake_case because they match persisted config
+  // shape and normalized failover reason IDs.
+  return {
+    default: agentRetryConfig?.default ?? authRetryConfig?.default,
+    rate_limit: agentRetryConfig?.rate_limit ?? authRetryConfig?.rate_limit,
+    overloaded: agentRetryConfig?.overloaded ?? authRetryConfig?.overloaded,
+    auth_failure: agentRetryConfig?.auth_failure ?? authRetryConfig?.auth_failure,
+  };
+}
 
 /**
  * Fallback abort check. Only treats explicit AbortError names as user aborts.
@@ -165,12 +182,7 @@ async function runFallbackCandidate<T>(params: {
   provider: string;
   model: string;
   options?: ModelFallbackRunOptions;
-  retryConfig?: {
-    default?: number;
-    rate_limit?: number;
-    overloaded?: number;
-    auth_failure?: number;
-  };
+  retryConfig?: FailoverRetriesConfig;
 }): Promise<{ ok: true; result: T } | { ok: false; error: unknown }> {
   try {
     const defaultRetryBudget = params.retryConfig?.default ?? 0;
@@ -229,12 +241,7 @@ async function runFallbackAttempt<T>(params: {
   model: string;
   attempts: FallbackAttempt[];
   options?: ModelFallbackRunOptions;
-  retryConfig?: {
-    default?: number;
-    rate_limit?: number;
-    overloaded?: number;
-    auth_failure?: number;
-  };
+  retryConfig?: FailoverRetriesConfig;
 }): Promise<{ success: ModelFallbackRunResult<T> } | { error: unknown }> {
   const runResult = await runFallbackCandidate({
     run: params.run,
@@ -670,7 +677,10 @@ export async function runWithModelFallback<T>(params: {
   const attempts: FallbackAttempt[] = [];
   let lastError: unknown;
   const cooldownProbeUsedProviders = new Set<string>();
-  const retryConfig = params.cfg?.agents?.defaults?.retries ?? params.cfg?.auth?.retries;
+  const retryConfig = resolveMergedRetryConfig(
+    params.cfg?.agents?.defaults?.retries,
+    params.cfg?.auth?.retries,
+  );
   const now = Date.now();
 
   const hasFallbackCandidates = candidates.length > 1;
