@@ -167,6 +167,24 @@ describe("isProfileInCooldown", () => {
     expect(isProfileInCooldown(store, "github-copilot:github")).toBe(true);
   });
 
+  it("returns false for a different model when cooldown is model-scoped (overloaded)", () => {
+    const store = makeStore({
+      "github-copilot:github": {
+        cooldownUntil: Date.now() + 60_000,
+        cooldownReason: "overloaded",
+        cooldownModel: "claude-sonnet-4.6",
+      },
+    });
+    // Different model bypasses the cooldown
+    expect(isProfileInCooldown(store, "github-copilot:github", undefined, "gpt-4.1")).toBe(false);
+    // Same model is still blocked
+    expect(
+      isProfileInCooldown(store, "github-copilot:github", undefined, "claude-sonnet-4.6"),
+    ).toBe(true);
+    // No model specified — blocked (conservative)
+    expect(isProfileInCooldown(store, "github-copilot:github")).toBe(true);
+  });
+
   it("returns true for all models when cooldownModel is undefined (profile-wide)", () => {
     const store = makeStore({
       "github-copilot:github": {
