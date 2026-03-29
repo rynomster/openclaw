@@ -333,6 +333,35 @@ describe("runWithModelFallback", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("skips candidate-level retries when run manages attempt retries", async () => {
+    const run = vi
+      .fn()
+      .mockRejectedValue({ status: 429, message: OPENAI_RATE_LIMIT_MESSAGE, code: "rate_limit" });
+
+    await expect(
+      runWithModelFallback({
+        cfg: {
+          agents: {
+            defaults: {
+              retries: {
+                rate_limit: 3,
+                overloaded: 3,
+                auth_failure: 3,
+              },
+            },
+          },
+        } as OpenClawConfig,
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        fallbacksOverride: [],
+        runManagesAttemptRetries: true,
+        run,
+      }),
+    ).rejects.toThrow();
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps openai gpt-5.3 codex on the openai provider before running", async () => {
     const cfg = makeCfg();
     const run = vi.fn().mockResolvedValueOnce("ok");
