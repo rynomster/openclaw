@@ -668,6 +668,12 @@ export async function runWithModelFallback<T>(params: {
   agentDir?: string;
   /** Optional explicit fallbacks list; when provided (even empty), replaces agents.defaults.model.fallbacks. */
   fallbacksOverride?: string[];
+  /**
+   * Disable candidate-level retries when the runtime already manages
+   * per-profile/per-attempt retries internally. This prevents retrying an
+   * entire auth-profile sweep for a single model candidate.
+   */
+  runManagesAttemptRetries?: boolean;
   run: ModelFallbackRunFn<T>;
   onError?: ModelFallbackErrorHandler;
 }): Promise<ModelFallbackRunResult<T>> {
@@ -687,6 +693,7 @@ export async function runWithModelFallback<T>(params: {
     params.cfg?.agents?.defaults?.retries,
     params.cfg?.auth?.retries,
   );
+  const candidateRetryConfig = params.runManagesAttemptRetries ? undefined : retryConfig;
   const hasFallbackCandidates = candidates.length > 1;
 
   for (let i = 0; i < candidates.length; i += 1) {
@@ -812,7 +819,7 @@ export async function runWithModelFallback<T>(params: {
       ...candidate,
       attempts,
       options: runOptions,
-      retryConfig,
+      retryConfig: candidateRetryConfig,
     });
     if ("success" in attemptRun) {
       if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
