@@ -3019,6 +3019,7 @@ Notes:
 
 ### Auth failover and retry tuning
 
+```json5
 {
   agents: {
     defaults: {
@@ -3044,6 +3045,7 @@ Notes:
     },
   },
 }
+```
 
 - `agents.defaults.retries`: per-reason retry budget used by model execution before fallback.
 - `auth.retries`: auth-profile runtime retry defaults with the same shape.
