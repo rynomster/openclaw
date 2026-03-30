@@ -57,6 +57,7 @@ import {
   persistSessionEntry as persistSessionEntryBase,
   prependInternalEventContext,
   runAgentAttempt,
+  sessionFileHasContent,
 } from "./command/attempt-execution.js";
 import { deliverAgentCommandResult } from "./command/delivery.js";
 import { resolveAgentRunContext } from "./command/run-context.js";
@@ -759,7 +760,7 @@ async function agentCommandInternal(
         runId,
         agentDir,
         fallbacksOverride: effectiveFallbacksOverride,
-        run: (providerOverride, modelOverride, runOptions) => {
+        run: async (providerOverride, modelOverride, runOptions) => {
           const candidateKey = `${providerOverride}:${modelOverride}`;
           if (candidateKey !== activeCandidateKey) {
             activeCandidateKey = candidateKey;
@@ -792,6 +793,7 @@ async function agentCommandInternal(
             sessionStore,
             storePath,
             allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
+            sessionHasHistory: !isNewSession || (await sessionFileHasContent(sessionFile)),
             onAgentEvent: (evt) => {
               // Track lifecycle end for fallback emission below.
               if (
