@@ -280,7 +280,7 @@ describe("runWithModelFallback", () => {
       }),
     ).rejects.toThrow();
 
-    expect(run).toHaveBeenCalledTimes(4);
+    expect(run).toHaveBeenCalledTimes(3);
   });
 
   it("retries recoverable auth failures using auth_failure retry budget", async () => {

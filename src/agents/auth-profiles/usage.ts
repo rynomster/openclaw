@@ -438,7 +438,7 @@ function resolveAuthCooldownConfig(params: {
   );
   const billingMaxHours = resolveHours(cooldowns?.billingMaxHours, defaults.billingMaxHours);
 
-  // Added support for configurable rate limit backoff (legacy: hardcoded to 1 min base / 1 hour max)
+  // Added support for configurable rate limit backoff (legacy: hardcoded to 30s → 60s → 5m max)
   const rateLimitBackoffMinutes = resolveHours(
     cooldowns?.rateLimitBackoffMinutes,
     defaults.rateLimitBackoffMinutes,
