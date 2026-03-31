@@ -208,7 +208,7 @@ async function runFallbackCandidate<T>(params: {
     // quickly to other providers without repeated backoff delays.
     const result = shouldRetryCandidate
       ? await retryAsync(runFn, {
-          attempts: 1 + rateLimitRetryBudget + overloadedRetryBudget + authRetryBudget,
+          attempts: 1 + Math.max(rateLimitRetryBudget, overloadedRetryBudget, authRetryBudget),
           minDelayMs: 2000,
           maxDelayMs: 30000,
           jitter: 0.1,
