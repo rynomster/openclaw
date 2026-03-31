@@ -453,6 +453,8 @@ export const OpenClawSchema = z
             rateLimitBackoffMinutes: z.number().positive().optional(),
             rateLimitMaxHours: z.number().positive().optional(),
             failureWindowHours: z.number().positive().optional(),
+            overloadedProfileRotations: z.number().int().nonnegative().optional(),
+            overloadedBackoffMs: z.number().int().nonnegative().optional(),
           })
           .strict()
           .optional(),
