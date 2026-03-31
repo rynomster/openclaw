@@ -562,7 +562,7 @@ function shouldProbePrimaryDuringCooldown(params: {
   }
 
   // Probe when cooldown already expired or within the configured margin.
-  return params.now >= soonest - PROBE_MARGIN_MS;
+  return true;
 }
 
 /** @internal – exposed for unit tests only */

@@ -38,9 +38,9 @@ export type AuthConfig = {
     billingBackoffHoursByProvider?: Record<string, number>;
     /** Billing backoff cap (hours). Default: 24. */
     billingMaxHours?: number;
-    /** Default rate-limit backoff (minutes). Default: 1. */
+    /** Default rate-limit backoff (minutes). Default: 0.5 (30 seconds). */
     rateLimitBackoffMinutes?: number;
-    /** Rate-limit backoff cap (hours). Default: 1. */
+    /** Rate-limit backoff cap (hours). Default: 0.083 (5 minutes). */
     rateLimitMaxHours?: number;
     /**
      * Failure window for backoff counters (hours). If no failures occur within
