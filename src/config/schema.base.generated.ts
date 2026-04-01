@@ -1407,6 +1407,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
           defaults: {
             type: "object",
             properties: {
+              params: {
+                type: "object",
+                propertyNames: {
+                  type: "string",
+                },
+                additionalProperties: {},
+              },
               model: {
                 anyOf: [
                   {
@@ -15331,6 +15338,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       tags: ["advanced", "url-secret"],
     },
   },
-  version: "2026.3.31",
+  version: "2026.4.1",
   generatedAt: "2026-03-22T21:17:33.302Z",
 } as const satisfies BaseConfigSchemaResponse;
