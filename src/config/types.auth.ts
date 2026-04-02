@@ -57,6 +57,11 @@ export type AuthConfig = {
      * Default: 0.
      */
     overloadedBackoffMs?: number;
+    /**
+     * Maximum same-provider auth-profile rotations to allow for rate-limit
+     * errors before escalating to cross-provider model fallback. Default: 1.
+     */
+    rateLimitedProfileRotations?: number;
   };
   /** Default retry settings for rate_limit and overloaded errors. */
   retries?: FailoverRetriesConfig;
