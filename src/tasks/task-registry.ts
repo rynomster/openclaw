@@ -9,7 +9,6 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
 import { isDeliverableMessageChannel } from "../utils/message-channel.js";
-import { getFlowById, syncFlowFromTask } from "./flow-runtime-internal.js";
 import {
   formatTaskBlockedFollowupMessage,
   formatTaskStateChangeMessage,
@@ -19,6 +18,12 @@ import {
   shouldAutoDeliverTaskTerminalUpdate,
   shouldSuppressDuplicateTerminalDelivery,
 } from "./task-executor-policy.js";
+import type { TaskFlowRecord } from "./task-flow-registry.types.js";
+import {
+  getTaskFlowById,
+  syncFlowFromTask,
+  updateFlowRecordByIdExpectedRevision,
+} from "./task-flow-runtime-internal.js";
 import {
   getTaskRegistryHooks,
   getTaskRegistryStore,
@@ -63,6 +68,41 @@ type TaskDeliveryOwner = {
   flowId?: string;
 };
 
+export type ParentFlowLinkErrorCode =
+  | "scope_kind_not_session"
+  | "parent_flow_not_found"
+  | "owner_key_mismatch"
+  | "cancel_requested"
+  | "terminal";
+
+export class ParentFlowLinkError extends Error {
+  constructor(
+    public readonly code: ParentFlowLinkErrorCode,
+    message: string,
+    public readonly details?: {
+      flowId?: string;
+      status?: TaskFlowRecord["status"];
+    },
+  ) {
+    super(message);
+    this.name = "ParentFlowLinkError";
+  }
+}
+
+export function isParentFlowLinkError(error: unknown): error is ParentFlowLinkError {
+  return error instanceof ParentFlowLinkError;
+}
+
+function isActiveTaskStatus(status: TaskStatus): boolean {
+  return status === "queued" || status === "running";
+}
+
+function isTerminalFlowStatus(status: TaskFlowRecord["status"]): boolean {
+  return (
+    status === "succeeded" || status === "failed" || status === "cancelled" || status === "lost"
+  );
+}
+
 function assertTaskOwner(params: { ownerKey: string; scopeKind: TaskScopeKind }) {
   const ownerKey = params.ownerKey.trim();
   if (!ownerKey && params.scopeKind !== "system") {
@@ -85,14 +125,37 @@ function assertParentFlowLinkAllowed(params: {
     return;
   }
   if (params.scopeKind !== "session") {
-    throw new Error("Only session-scoped tasks can link to flows.");
+    throw new ParentFlowLinkError(
+      "scope_kind_not_session",
+      "Only session-scoped tasks can link to flows.",
+      { flowId },
+    );
   }
-  const flow = getFlowById(flowId);
+  const flow = getTaskFlowById(flowId);
   if (!flow) {
-    throw new Error(`Parent flow not found: ${flowId}`);
+    throw new ParentFlowLinkError("parent_flow_not_found", `Parent flow not found: ${flowId}`, {
+      flowId,
+    });
   }
   if (normalizeOwnerKey(flow.ownerKey) !== normalizeOwnerKey(params.ownerKey)) {
-    throw new Error("Task ownerKey must match parent flow ownerKey.");
+    throw new ParentFlowLinkError(
+      "owner_key_mismatch",
+      "Task ownerKey must match parent flow ownerKey.",
+      { flowId },
+    );
+  }
+  if (flow.cancelRequestedAt != null) {
+    throw new ParentFlowLinkError(
+      "cancel_requested",
+      "Parent flow cancellation has already been requested.",
+      { flowId, status: flow.status },
+    );
+  }
+  if (isTerminalFlowStatus(flow.status)) {
+    throw new ParentFlowLinkError("terminal", `Parent flow is already ${flow.status}.`, {
+      flowId,
+      status: flow.status,
+    });
   }
 }
 
@@ -664,7 +727,7 @@ function getLinkedFlowForDelivery(task: TaskRecord) {
   if (!flowId || task.scopeKind !== "session") {
     return undefined;
   }
-  const flow = getFlowById(flowId);
+  const flow = getTaskFlowById(flowId);
   if (!flow) {
     return undefined;
   }
@@ -692,6 +755,55 @@ function resolveTaskDeliveryOwner(task: TaskRecord): TaskDeliveryOwner {
     sessionKey: task.ownerKey.trim(),
     requesterOrigin: normalizeDeliveryContext(taskDeliveryStates.get(task.taskId)?.requesterOrigin),
   };
+}
+
+function syncManagedFlowCancellationFromTask(task: TaskRecord): void {
+  const flowId = task.parentFlowId?.trim();
+  if (!flowId) {
+    return;
+  }
+  let flow = getTaskFlowById(flowId);
+  if (
+    !flow ||
+    flow.syncMode !== "managed" ||
+    flow.cancelRequestedAt == null ||
+    isTerminalFlowStatus(flow.status)
+  ) {
+    return;
+  }
+  if (listTasksForFlowId(flowId).some((candidate) => isActiveTaskStatus(candidate.status))) {
+    return;
+  }
+  const endedAt = task.endedAt ?? task.lastEventAt ?? Date.now();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = updateFlowRecordByIdExpectedRevision({
+      flowId,
+      expectedRevision: flow.revision,
+      patch: {
+        status: "cancelled",
+        blockedTaskId: null,
+        blockedSummary: null,
+        waitJson: null,
+        endedAt,
+        updatedAt: endedAt,
+      },
+    });
+    if (result.applied || result.reason === "not_found") {
+      return;
+    }
+    flow = result.current;
+    if (
+      !flow ||
+      flow.syncMode !== "managed" ||
+      flow.cancelRequestedAt == null ||
+      isTerminalFlowStatus(flow.status)
+    ) {
+      return;
+    }
+    if (listTasksForFlowId(flowId).some((candidate) => isActiveTaskStatus(candidate.status))) {
+      return;
+    }
+  }
 }
 
 function restoreTaskRegistryOnce() {
@@ -762,6 +874,15 @@ function updateTask(taskId: string, patch: Partial<TaskRecord>): TaskRecord | nu
     syncFlowFromTask(next);
   } catch (error) {
     log.warn("Failed to sync parent flow from task update", {
+      taskId,
+      flowId: next.parentFlowId,
+      error,
+    });
+  }
+  try {
+    syncManagedFlowCancellationFromTask(next);
+  } catch (error) {
+    log.warn("Failed to finalize managed flow cancellation from task update", {
       taskId,
       flowId: next.parentFlowId,
       error,
@@ -1806,8 +1927,12 @@ export function resetTaskRegistryForTests(opts?: { persist?: boolean }) {
   listenerStarted = false;
   if (opts?.persist !== false) {
     persistTaskRegistry();
-    // Close the sqlite handle after persisting the empty snapshot so Windows temp-dir
-    // cleanup can remove the state directory without hitting runs.sqlite EBUSY errors.
-    getTaskRegistryStore().close?.();
   }
+  // Always close the sqlite handle so Windows temp-dir cleanup can remove the
+  // state directory even when a test intentionally skips persisting the reset.
+  getTaskRegistryStore().close?.();
+}
+
+export function resetTaskRegistryDeliveryRuntimeForTests() {
+  deliveryRuntimePromise = null;
 }

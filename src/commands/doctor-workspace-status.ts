@@ -3,13 +3,13 @@ import { buildWorkspaceSkillStatus } from "../agents/skills-status.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { buildPluginCompatibilityWarnings, buildPluginStatusReport } from "../plugins/status.js";
-import { listFlowRecords } from "../tasks/flow-runtime-internal.js";
 import { listTasksForFlowId } from "../tasks/runtime-internal.js";
+import { listTaskFlowRecords } from "../tasks/task-flow-runtime-internal.js";
 import { note } from "../terminal/note.js";
 import { detectLegacyWorkspaceDirs, formatLegacyWorkspaceWarning } from "./doctor-workspace.js";
 
 function noteFlowRecoveryHints() {
-  const suspicious = listFlowRecords().flatMap((flow) => {
+  const suspicious = listTaskFlowRecords().flatMap((flow) => {
     const tasks = listTasksForFlowId(flow.flowId);
     const findings: string[] = [];
     if (
@@ -19,7 +19,7 @@ function noteFlowRecoveryHints() {
       flow.waitJson === undefined
     ) {
       findings.push(
-        `${flow.flowId}: running managed flow has no linked tasks or wait state; inspect or cancel it manually.`,
+        `${flow.flowId}: running managed TaskFlow has no linked tasks or wait state; inspect or cancel it manually.`,
       );
     }
     if (
@@ -28,7 +28,7 @@ function noteFlowRecoveryHints() {
       !tasks.some((task) => task.taskId === flow.blockedTaskId)
     ) {
       findings.push(
-        `${flow.flowId}: blocked flow points at missing task ${flow.blockedTaskId}; inspect before retrying.`,
+        `${flow.flowId}: blocked TaskFlow points at missing task ${flow.blockedTaskId}; inspect before retrying.`,
       );
     }
     return findings;
@@ -40,8 +40,8 @@ function noteFlowRecoveryHints() {
     [
       ...suspicious.slice(0, 5),
       suspicious.length > 5 ? `...and ${suspicious.length - 5} more.` : null,
-      `Inspect: ${formatCliCommand("openclaw flows show <flow-id>")}`,
-      `Cancel: ${formatCliCommand("openclaw flows cancel <flow-id>")}`,
+      `Inspect: ${formatCliCommand("openclaw tasks flow show <flow-id>")}`,
+      `Cancel: ${formatCliCommand("openclaw tasks flow cancel <flow-id>")}`,
     ]
       .filter((line): line is string => Boolean(line))
       .join("\n"),
