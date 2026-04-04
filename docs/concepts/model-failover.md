@@ -3,7 +3,6 @@ summary: "How OpenClaw rotates auth profiles and falls back across models"
 read_when:
   - Diagnosing auth profile rotation, cooldowns, or model fallback behavior
   - Updating failover rules for auth profiles or models
-  - Understanding how session model overrides interact with fallback retries
 title: "Model Failover"
 ---
 
@@ -11,48 +10,11 @@ title: "Model Failover"
 
 OpenClaw handles failures in two stages:
 
-1. **Auth profile rotation** within the current provider.
-2. **Model fallback** to the next model in `agents.defaults.model.fallbacks`.
+1. **Retry** the current provider/model when the error reason is retryable.
+2. **Auth profile rotation** within the current provider when a profile is unusable.
+3. **Model fallback** to the next model in `agents.defaults.model.fallbacks`.
 
 This doc explains the runtime rules and the data that backs them.
-
-## Runtime flow
-
-For a normal text run, OpenClaw evaluates candidates in this order:
-
-1. The currently selected session model.
-2. Configured `agents.defaults.model.fallbacks` in order.
-3. The configured primary model at the end when the run started from an override.
-
-Inside each candidate, OpenClaw tries auth-profile failover before advancing to
-the next model candidate.
-
-High-level sequence:
-
-1. Resolve the active session model and auth-profile preference.
-2. Build the model candidate chain.
-3. Try the current provider with auth-profile rotation/cooldown rules.
-4. If that provider is exhausted with a failover-worthy error, move to the next
-   model candidate.
-5. Persist the selected fallback override before the retry starts so other
-   session readers see the same provider/model the runner is about to use.
-6. If the fallback candidate fails, roll back only the fallback-owned session
-   override fields when they still match that failed candidate.
-7. If every candidate fails, throw a `FallbackSummaryError` with per-attempt
-   detail and the soonest cooldown expiry when one is known.
-
-This is intentionally narrower than "save and restore the whole session". The
-reply runner only persists the model-selection fields it owns for fallback:
-
-- `providerOverride`
-- `modelOverride`
-- `authProfileOverride`
-- `authProfileOverrideSource`
-- `authProfileOverrideCompactionCount`
-
-That prevents a failed fallback retry from overwriting newer unrelated session
-mutations such as manual `/model` changes or session rotation updates that
-happened while the attempt was running.
 
 ## Auth storage (keys + OAuth)
 
@@ -116,15 +78,63 @@ If you have both an OAuth profile and an API key profile for the same provider, 
 - Pin with `auth.order[provider] = ["provider:profileId"]`, or
 - Use a per-session override via `/model …` with a profile override (when supported by your UI/chat surface).
 
-## Cooldowns
+## Retry before fallback
 
-When a profile fails due to auth/rate‑limit errors (or a timeout that looks
-like rate limiting), OpenClaw marks it in cooldown and moves to the next profile.
-Format/invalid‑request errors (for example Cloud Code Assist tool call ID
-validation failures) are treated as failover‑worthy and use the same cooldowns.
-OpenAI-compatible stop-reason errors such as `Unhandled stop reason: error`,
-`stop reason: error`, and `reason: error` are classified as timeout/failover
-signals.
+Before OpenClaw advances to another profile or fallback model, it retries the
+current provider/model for selected transient reasons.
+
+Retry reasons:
+
+- `rate_limit` ✅ retryable
+- `overloaded` ✅ retryable
+- `auth` ✅ retryable (recoverable auth failure)
+- `auth_permanent` ❌ not retryable
+
+Retry budget is reason-aware and configurable via both:
+
+- `agents.defaults.retries` (agent-level model execution defaults)
+- `auth.retries` (auth-profile runtime defaults)
+
+Retry config keys:
+
+- `default`
+- `rate_limit`
+- `overloaded`
+- `auth_failure` (**config key only**)
+
+`auth_failure` maps to runtime reason `auth` (recoverable auth failures only).
+`auth_permanent` is never retried.
+
+Retry timing:
+
+- Base delay: 2 seconds
+- Exponential backoff: doubles each retry
+- Max delay: 30 seconds
+- Jitter: 10%
+
+## Cooldowns (model-scoped vs profile-wide)
+
+When a profile fails and cannot be used immediately, OpenClaw records cooldown
+state in `auth-profiles.json` under `usageStats`.
+
+- **Model-scoped cooldown**: usually for transient `rate_limit`/`overloaded`
+  failures; OpenClaw records `cooldownModel`.
+- **Profile-wide cooldown/disable**: for profile-level issues (`auth_permanent`,
+  billing, and non-model-specific/general failures); OpenClaw applies the window
+  across models.
+
+Cooldown scope widening rules:
+
+- If a different model fails while the profile is already in model-scoped cooldown,
+  OpenClaw widens to profile-wide.
+- If a new failure occurs without a known model ID, OpenClaw widens
+  conservatively to profile-wide.
+
+`auth_permanent` behavior:
+
+- sets `disabledUntil`
+- clears `cooldownModel`
+- locks the entire profile (all models)
 
 Cooldowns use exponential backoff:
 
@@ -133,7 +143,7 @@ Cooldowns use exponential backoff:
 - 25 minutes
 - 1 hour (cap)
 
-State is stored in `auth-profiles.json` under `usageStats`:
+State example:
 
 ```json
 {
@@ -141,6 +151,7 @@ State is stored in `auth-profiles.json` under `usageStats`:
     "provider:profile": {
       "lastUsed": 1736160000000,
       "cooldownUntil": 1736160600000,
+      "cooldownModel": "anthropic/claude-sonnet-4-6",
       "errorCount": 2
     }
   }
@@ -187,112 +198,70 @@ with `auth.cooldowns.overloadedProfileRotations`,
 When a run starts with a model override (hooks or CLI), fallbacks still end at
 `agents.defaults.model.primary` after trying any configured fallbacks.
 
-### Candidate chain rules
+### Probe throttling and memory behavior
 
-OpenClaw builds the candidate list from the currently requested `provider/model`
-plus configured fallbacks.
+When all profiles for a provider are cooling down, OpenClaw may periodically
+probe the primary model to recover quickly near cooldown expiry. This avoids
+waiting for the next normal request to discover that cooldown ended.
 
-Rules:
+Probe behavior:
 
-- The requested model is always first.
-- Explicit configured fallbacks are deduplicated but not filtered by the model
-  allowlist. They are treated as explicit operator intent.
-- If the current run is already on a configured fallback in the same provider
-  family, OpenClaw keeps using the full configured chain.
-- If the current run is on a different provider than config and that current
-  model is not already part of the configured fallback chain, OpenClaw does not
-  append unrelated configured fallbacks from another provider.
-- When the run started from an override, the configured primary is appended at
-  the end so the chain can settle back onto the normal default once earlier
-  candidates are exhausted.
+- Probes are considered when cooldown expiry is close (within 2 minutes).
+- Probe attempts are throttled per `agentDir::provider`.
 
-### Which errors advance fallback
+Probe throttle state is bounded:
 
-Model fallback continues on:
+- Entries expire after 24 hours of inactivity (TTL).
+- Maximum tracked keys: 256 (oldest are evicted first).
 
-- auth failures
-- rate limits and cooldown exhaustion
-- overloaded/provider-busy errors
-- timeout-shaped failover errors
-- billing disables
-- `LiveSessionModelSwitchError`, which is normalized into a failover path so a
-  stale persisted model does not create an outer retry loop
-- other unrecognized errors when there are still remaining candidates
+This keeps long-running processes from growing probe-throttle memory without
+bound.
 
-Model fallback does not continue on:
+## Behavior summary
 
-- explicit aborts that are not timeout/failover-shaped
-- context overflow errors that should stay inside compaction/retry logic
-- a final unknown error when there are no candidates left
+`Request → Retry → Cooldown/Disable profile → Probe near expiry → Fallback`
 
-### Cooldown skip vs probe behavior
-
-When every auth profile for a provider is already in cooldown, OpenClaw does
-not automatically skip that provider forever. It makes a per-candidate decision:
-
-- Persistent auth failures skip the whole provider immediately.
-- Billing disables usually skip, but the primary candidate can still be probed
-  on a throttle so recovery is possible without restarting.
-- The primary candidate may be probed near cooldown expiry, with a per-provider
-  throttle.
-- Same-provider fallback siblings can be attempted despite cooldown when the
-  failure looks transient (`rate_limit`, `overloaded`, or unknown).
-- Transient cooldown probes are limited to one per provider per fallback run so
-  a single provider does not stall cross-provider fallback.
-
-## Session overrides and live model switching
-
-Session model changes are shared state. The active runner, `/model` command,
-compaction/session updates, and live-session reconciliation all read or write
-parts of the same session entry.
-
-That means fallback retries have to coordinate with live model switching:
-
-- Before a fallback retry starts, the reply runner persists the selected
-  fallback override fields to the session entry.
-- Live-session reconciliation prefers persisted session overrides over stale
-  runtime model fields.
-- If the fallback attempt fails, the runner rolls back only the override fields
-  it wrote, and only if they still match that failed candidate.
-
-This prevents the classic race:
-
-1. Primary fails.
-2. Fallback candidate is chosen in memory.
-3. Session store still says the old primary.
-4. Live-session reconciliation reads the stale session state.
-5. The retry gets snapped back to the old model before the fallback attempt
-   starts.
-
-The persisted fallback override closes that window, and the narrow rollback
-keeps newer manual or runtime session changes intact.
-
-## Observability and failure summaries
-
-`runWithModelFallback(...)` records per-attempt details that feed logs and
-user-facing cooldown messaging:
-
-- provider/model attempted
-- reason (`rate_limit`, `overloaded`, `billing`, `auth`, `model_not_found`, and
-  similar failover reasons)
-- optional status/code
-- human-readable error summary
-
-When every candidate fails, OpenClaw throws `FallbackSummaryError`. The outer
-reply runner can use that to build a more specific message such as "all models
-are temporarily rate-limited" and include the soonest cooldown expiry when one
-is known.
+- Retry happens first and only for retryable reasons.
+- If retries are exhausted or reason is not retryable, OpenClaw marks cooldown
+  or disable state and rotates profiles.
+- If provider profiles remain unavailable, OpenClaw can probe near expiry, then
+  continue fallback to the next model when needed.
 
 ## Related config
 
 See [Gateway configuration](/gateway/configuration) for:
 
 - `auth.profiles` / `auth.order`
+- `auth.retries`
+- `auth.cooldowns.rateLimitBackoffMinutes` / `auth.cooldowns.rateLimitMaxHours`
 - `auth.cooldowns.billingBackoffHours` / `auth.cooldowns.billingBackoffHoursByProvider`
 - `auth.cooldowns.billingMaxHours` / `auth.cooldowns.failureWindowHours`
 - `auth.cooldowns.overloadedProfileRotations` / `auth.cooldowns.overloadedBackoffMs`
 - `auth.cooldowns.rateLimitedProfileRotations`
+- `agents.defaults.retries`
 - `agents.defaults.model.primary` / `agents.defaults.model.fallbacks`
 - `agents.defaults.imageModel` routing
+
+Example:
+
+```yaml
+agents:
+  defaults:
+    retries:
+      default: 1
+      rate_limit: 3
+      overloaded: 2
+      auth_failure: 1
+
+auth:
+  retries:
+    default: 1
+    rate_limit: 3
+    overloaded: 2
+    auth_failure: 1
+  cooldowns:
+    rateLimitBackoffMinutes: 1
+    rateLimitMaxHours: 1
+```
 
 See [Models](/concepts/models) for the broader model selection and fallback overview.
